@@ -17,8 +17,9 @@
 //
 // Configure authentication and transport with logging.NewClient and batching
 // with Client.Logger. NewExporter borrows that logger and preserves its options.
-// Stop producers and close the slogcp handler before flushing the exporter and
-// closing the logging client. The logging client owns the delivery buffers.
+// Stop producers and finish draining or aborting the slogcp handler before
+// flushing the exporter and closing the client. A handler shutdown timeout can
+// leave workers running. The logging client owns the delivery buffers.
 package slogcpgrpc
 
 import (
@@ -56,10 +57,11 @@ var _ slogcp.EntryExporter = (*Exporter)(nil)
 // Option configures an Exporter during construction.
 type Option func(*Exporter)
 
-// WithSynchronous waits for the API acknowledgement for each entry and returns
-// delivery errors from Export. The record context controls the RPC deadline.
-// Ordinary slog.Logger methods discard handler errors. Call Handler.Handle
-// directly when the caller needs the acknowledgement or error.
+// WithSynchronous waits for logging.Logger.LogSync in each Export call and
+// returns delivery errors. The record context controls the RPC deadline.
+// Handler.Handle returns those errors when no async handler wraps the exporter.
+// With slogcp.WithAsync, Handle returns after enqueue and worker errors go to
+// the async error writer. Ordinary slog.Logger methods discard handler errors.
 func WithSynchronous() Option {
 	return func(e *Exporter) { e.synchronous = true }
 }
