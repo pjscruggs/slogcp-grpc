@@ -1,0 +1,83 @@
+name: CI Action Smoke Tests
+
+on:
+  workflow_call:
+    outputs:
+      validation_passed:
+        description: The candidate action completed its local protocol smoke test.
+        value: ${{ jobs.smoke.outputs.validation_passed }}
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Exercise CI Actions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      validation_passed: ${{ steps.policy.outputs.validation_passed }}
+    steps:
+      - name: Checkout Candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          persist-credentials: false
+
+      - name: Start Local Protocol Fixtures
+        id: fixture
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/action-smoke"
+          python .github/scripts/action_smoke_server.py serve --directory "$fixture_dir" > "$RUNNER_TEMP/action-smoke.log" 2>&1 &
+          for attempt in {1..100}; do
+            [[ -f "$fixture_dir/fixture.json" ]] && break
+            sleep 0.1
+          done
+          test -f "$fixture_dir/fixture.json"
+          jq -r 'to_entries[] | "\(.key)=\(.value)"' "$fixture_dir/fixture.json" >> "$GITHUB_OUTPUT"
+          delimiter="$(openssl rand -hex 16)"
+          printf 'private_key<<%s\n' "$delimiter" >> "$GITHUB_OUTPUT"
+          cat "$(jq -r .private_key_path "$fixture_dir/fixture.json")" >> "$GITHUB_OUTPUT"
+          printf '\n%s\n' "$delimiter" >> "$GITHUB_OUTPUT"
+
+      - name: Exercise App Token Creation
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ steps.fixture.outputs.app_id }}
+          private-key: ${{ steps.fixture.outputs.private_key }}
+          owner: ${{ steps.fixture.outputs.owner }}
+          repositories: ${{ steps.fixture.outputs.repository }}
+          github-api-url: ${{ steps.fixture.outputs.base_url }}
+          permission-contents: read
+          skip-token-revoke: true
+
+      - name: Verify Action Results And Protocol Requests
+        id: verify
+        env:
+          APP_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          python .github/scripts/action_smoke_server.py verify --directory "$RUNNER_TEMP/action-smoke" \
+            --github-only --app-token "$APP_TOKEN"
+
+      - name: Stop Local Protocol Fixtures
+        id: cleanup
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/action-smoke/fixture.json" ]]; then
+            python .github/scripts/action_smoke_server.py stop --directory "$RUNNER_TEMP/action-smoke"
+          fi
+
+      - name: Require Successful Action Execution
+        id: policy
+        if: always()
+        env:
+          RESULTS: ${{ steps.fixture.outcome }} ${{ steps.app_token.outcome }} ${{ steps.verify.outcome }} ${{ steps.cleanup.outcome }}
+        run: |
+          set -euo pipefail
+          read -r -a results <<< "$RESULTS"
+          test "${#results[@]}" = 4
+          for result in "${results[@]}"; do test "$result" = success; done
+          echo "validation_passed=true" >> "$GITHUB_OUTPUT"

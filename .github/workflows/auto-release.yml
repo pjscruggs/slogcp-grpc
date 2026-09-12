@@ -1,0 +1,208 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ version.go ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Optional release version; must match this mainline Version transition.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-release-main
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  release_intent:
+    name: Detect Release Intent
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.intent.outputs.should_release }}
+      version: ${{ steps.intent.outputs.version }}
+    steps:
+      - name: Checkout Release Source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test Release Policy
+        run: python -B -m unittest discover -s .github/scripts -p 'test_release_*.py' -v
+
+      - name: Detect Release Intent
+        id: intent
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: python .github/scripts/release_policy.py plan
+
+  release_preflight:
+    name: Validate Release Commit
+    needs: release_intent
+    if: needs.release_intent.outputs.should_release == 'true'
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/validation_pipeline.yml
+
+  release_e2e:
+    name: Validate Release With Cloud E2E
+    needs: [release_intent, release_preflight]
+    if: needs.release_intent.outputs.should_release == 'true'
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      id-token: write
+    uses: ./.github/workflows/module-e2e.yml
+    secrets: inherit
+
+  release:
+    name: Create Signed Tag And Release
+    needs: [ release_intent, release_preflight, release_e2e ]
+    if: always() && needs.release_intent.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    environment: release-tags
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.release_intent.outputs.version }}
+    steps:
+      - name: Require Successful Release Validation
+        env:
+          VALIDATION_RESULT: ${{ needs.release_preflight.result }}
+          E2E_RESULT: ${{ needs.release_e2e.result }}
+          VALIDATION_PASSED: ${{ needs.release_preflight.outputs.validation_passed }}
+        run: |
+          set -euo pipefail
+          test "$VALIDATION_RESULT" = success
+          test "$E2E_RESULT" = success
+          test "$VALIDATION_PASSED" = true
+
+      - name: Checkout Validated Commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check Existing Tag
+        id: tag_state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/release_policy.py tag-state
+
+      - name: Detect Release App Credentials
+        id: release_app
+        shell: bash
+        env:
+          RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${RELEASE_APP_ID:-}" && -n "${RELEASE_APP_PRIVATE_KEY:-}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          elif [[ -n "${RELEASE_APP_ID:-}" || -n "${RELEASE_APP_PRIVATE_KEY:-}" ]]; then
+            echo "RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY must be configured together." >&2
+            exit 1
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No release App credentials are configured; using the workflow token."
+          fi
+
+      - name: Generate Release App Token
+        if: steps.release_app.outputs.available == 'true'
+        id: release_app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Configure SSH Tag Signing
+        if: steps.tag_state.outputs.tag_exists != 'true'
+        id: signing
+        shell: bash
+        env:
+          RELEASE_SIGNER_EMAIL: ${{ vars.RELEASE_SIGNER_EMAIL }}
+          RELEASE_SIGNER_NAME: ${{ vars.RELEASE_SIGNER_NAME }}
+          RELEASE_SSH_PRIVATE_KEY_B64: ${{ secrets.RELEASE_SSH_PRIVATE_KEY_B64 }}
+          RELEASE_SSH_PUBLIC_KEY: ${{ secrets.RELEASE_SSH_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          : "${RELEASE_SIGNER_EMAIL:?Missing signing identity}"
+          : "${RELEASE_SIGNER_NAME:?Missing signing name}"
+          : "${RELEASE_SSH_PRIVATE_KEY_B64:?Missing signing key}"
+          : "${RELEASE_SSH_PUBLIC_KEY:?Missing signing public key}"
+          umask 077
+          key_file="$RUNNER_TEMP/release_signing_key"
+          printf '%s' "$RELEASE_SSH_PRIVATE_KEY_B64" | base64 -d > "$key_file"
+          printf '%s\n' "$RELEASE_SSH_PUBLIC_KEY" > "${key_file}.pub"
+          ssh-keygen -y -f "$key_file" >/dev/null
+          printf '%s %s\n' "$RELEASE_SIGNER_EMAIL" "$RELEASE_SSH_PUBLIC_KEY" > "$RUNNER_TEMP/release_allowed_signers"
+          git config user.name "$RELEASE_SIGNER_NAME"
+          git config user.email "$RELEASE_SIGNER_EMAIL"
+          git config gpg.format ssh
+          git config user.signingkey "$key_file"
+          git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/release_allowed_signers"
+          git config tag.gpgSign true
+
+      - name: Create And Push Signed Tag
+        if: steps.tag_state.outputs.tag_exists != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.release_app_token.outputs.token || github.token }}
+        run: |
+          set -euo pipefail
+          git tag -s "$VERSION" "$GITHUB_SHA" -m "Release $VERSION"
+          git tag -v "$VERSION"
+          gh auth setup-git
+          for attempt in 1 2 3; do
+            if git push "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$VERSION"; then
+              exit 0
+            fi
+            if python .github/scripts/release_policy.py verify-tag; then
+              exit 0
+            fi
+            sleep "$attempt"
+          done
+          exit 1
+
+      - name: Remove Signing Key Material
+        if: always() && steps.tag_state.outputs.tag_exists != 'true'
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/release_signing_key" "$RUNNER_TEMP/release_signing_key.pub" "$RUNNER_TEMP/release_allowed_signers"
+
+      - name: Verify Tag And Publish Or Resume Release
+        env:
+          GH_TOKEN: ${{ steps.release_app_token.outputs.token || github.token }}
+        run: python .github/scripts/release_policy.py publish
+
+      - name: Request Go Proxy Indexing
+        if: github.event.repository.private == false
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          module_path="$(awk '$1 == "module" {print $2; exit}' go.mod)"
+          [[ -n "$module_path" ]]
+          for attempt in 1 2 3; do
+            if curl --fail --silent --show-error --max-time 30 \
+              "https://proxy.golang.org/${module_path}/@v/${VERSION}.info" >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::Go proxy indexing is pending; the signed tag and GitHub release are complete."

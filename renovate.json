@@ -1,0 +1,399 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":gomod",
+    "helpers:pinGitHubActionDigests",
+    "security:gomodIndirectSecurityUpdates"
+  ],
+  "timezone": "America/Chicago",
+  "schedule": [
+    "* * * * 1"
+  ],
+  "updateNotScheduled": true,
+  "rebaseWhen": "behind-base-branch",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "* * * * 1"
+    ]
+  },
+  "platformAutomerge": false,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "security"
+    ],
+    "vulnerabilityFixStrategy": "lowest"
+  },
+  "osvVulnerabilityAlerts": true,
+  "postUpdateOptions": [
+    "gomodTidyAll"
+  ],
+  "packageRules": [
+    {
+      "description": "Keep root dependency branches separate from tools and examples",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchFileNames": [
+        "go.mod"
+      ],
+      "additionalBranchPrefix": "root-"
+    },
+    {
+      "description": "Keep CI tool dependency branches separate from library dependencies",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchFileNames": [
+        ".github/tools/go.mod"
+      ],
+      "additionalBranchPrefix": "tools-"
+    },
+    {
+      "description": "Keep example dependency branches separate from library dependencies",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchFileNames": [
+        ".examples/grpc/go.mod"
+      ],
+      "additionalBranchPrefix": "examples-"
+    },
+    {
+      "description": "Do not automate the module's public Go compatibility floor",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "golang-version"
+      ],
+      "matchDepTypes": [
+        "golang"
+      ],
+      "matchDepNames": [
+        "go"
+      ],
+      "matchFileNames": [
+        "go.mod"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Do not update the CI tools module Go directive independently",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "golang-version"
+      ],
+      "matchDepTypes": [
+        "golang"
+      ],
+      "matchDepNames": [
+        "go"
+      ],
+      "matchFileNames": [
+        ".github/tools/go.mod"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "GitHub Actions updates stay separate from executable CI tools",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchFileNames": [
+        ".github/**"
+      ],
+      "groupName": "github actions",
+      "labels": [
+        "renovate:ci",
+        "dependency-scope:ci"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "prPriority": 20
+    },
+    {
+      "description": "Compiler-sensitive Go CI tools update together",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchPackageNames": [
+        "github.com/golangci/golangci-lint/v2",
+        "golang.org/x/tools",
+        "golang.org/x/vuln"
+      ],
+      "matchFileNames": [
+        ".github/tools/go.mod"
+      ],
+      "matchJsonata": [
+        "$not(isVulnerabilityAlert = true or $exists(vulnerabilityFixVersion))"
+      ],
+      "enabled": true,
+      "groupName": "compiler-sensitive ci tools",
+      "labels": [
+        "renovate:ci",
+        "dependency-scope:ci"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "prPriority": 25
+    },
+    {
+      "description": "Auxiliary Go CI tools update separately",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchPackageNames": [
+        "github.com/apache/skywalking-eyes"
+      ],
+      "matchFileNames": [
+        ".github/tools/go.mod"
+      ],
+      "matchJsonata": [
+        "$not(isVulnerabilityAlert = true or $exists(vulnerabilityFixVersion))"
+      ],
+      "enabled": true,
+      "groupName": "auxiliary ci tools",
+      "labels": [
+        "renovate:ci",
+        "dependency-scope:ci"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "prPriority": 20
+    },
+    {
+      "description": "Keep CI tools vulnerability fixes separate from public dependency floor updates",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchFileNames": [
+        ".github/tools/go.mod"
+      ],
+      "matchJsonata": [
+        "isVulnerabilityAlert = true or $exists(vulnerabilityFixVersion)"
+      ],
+      "dependencyDashboardApproval": false,
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "addLabels": [
+        "renovate:ci",
+        "dependency-scope:ci"
+      ]
+    },
+    {
+      "description": "Do not propose routine root go.mod dependency floor updates",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchFileNames": [
+        "go.mod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchDepTypes": [
+        "require",
+        "indirect"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch",
+        "pin",
+        "digest",
+        "pinDigest",
+        "lockFileMaintenance",
+        "rollback",
+        "replacement"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Repair root dependency vulnerabilities and prepare a patch release",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchFileNames": [
+        "go.mod"
+      ],
+      "matchDepTypes": [
+        "require",
+        "indirect"
+      ],
+      "matchJsonata": [
+        "isVulnerabilityAlert = true or $exists(vulnerabilityFixVersion)"
+      ],
+      "enabled": true,
+      "dependencyDashboardApproval": false,
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "addLabels": [
+        "security:floor",
+        "renovate:type-security-floor"
+      ],
+      "bumpVersions": [
+        {
+          "filePatterns": [
+            "version.go"
+          ],
+          "matchStrings": [
+            "(?:var|const) Version = \"v(?<version>\\d+\\.\\d+\\.\\d+)\""
+          ],
+          "bumpType": "patch"
+        }
+      ]
+    },
+    {
+      "description": "Keep the root go.mod toolchain directive on the latest released Go toolchain",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "golang-version"
+      ],
+      "matchDepTypes": [
+        "toolchain"
+      ],
+      "matchDepNames": [
+        "go"
+      ],
+      "matchFileNames": [
+        "go.mod"
+      ],
+      "dependencyDashboardApproval": false,
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "groupName": "root go toolchain",
+      "labels": [
+        "renovate:toolchain",
+        "dependency-scope:toolchain"
+      ],
+      "prPriority": 15
+    },
+    {
+      "description": "Keep checked-in example module go directives on the latest released Go version",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "golang-version"
+      ],
+      "matchDepTypes": [
+        "golang"
+      ],
+      "matchDepNames": [
+        "go"
+      ],
+      "matchFileNames": [
+        ".examples/grpc/go.mod"
+      ],
+      "rangeStrategy": "bump",
+      "dependencyDashboardApproval": false,
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "groupName": "examples go directives",
+      "labels": [
+        "renovate:examples",
+        "dependency-scope:examples",
+        "renovate:go-version"
+      ],
+      "prPriority": 6
+    },
+    {
+      "description": "Routine latest-compatible updates for the checked-in module example",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchFileNames": [
+        ".examples/grpc/go.mod"
+      ],
+      "matchJsonata": [
+        "$not(isVulnerabilityAlert = true or $exists(vulnerabilityFixVersion))"
+      ],
+      "enabled": true,
+      "groupName": "examples module dependencies",
+      "labels": [
+        "renovate:examples",
+        "dependency-scope:examples"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "prPriority": 5
+    },
+    {
+      "description": "Automatically repair example dependencies without a library release",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchFileNames": [
+        ".examples/grpc/go.mod"
+      ],
+      "matchJsonata": [
+        "isVulnerabilityAlert = true or $exists(vulnerabilityFixVersion)"
+      ],
+      "dependencyDashboardApproval": false,
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "addLabels": [
+        "renovate:examples",
+        "dependency-scope:examples"
+      ]
+    },
+    {
+      "description": "Do not update the local unpublished adapter requirement used by examples",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchFileNames": [
+        ".examples/**"
+      ],
+      "matchPackageNames": [
+        "github.com/pjscruggs/slogcp-grpc"
+      ],
+      "enabled": false
+    }
+  ],
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 10
+}
