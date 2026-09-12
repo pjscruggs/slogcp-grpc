@@ -1,0 +1,489 @@
+name: Validation Pipeline
+
+on:
+  pull_request:
+    branches: [ main ]
+  merge_group:
+    branches: [ main ]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      go_validation_mode:
+        description: Select requirement-based or latest-stable Go validation.
+        required: false
+        type: string
+        default: requirements
+    outputs:
+      validation_passed:
+        description: Whether every required module validation job succeeded.
+        value: ${{ jobs.module_local_validation_policy.outputs.validation_passed }}
+      validated_mode:
+        description: Go validation mode reported by the workflow.
+        value: ${{ jobs.module_local_validation_policy.outputs.validated_mode }}
+      root_version:
+        description: Exact Go version used for preferred root validation.
+        value: ${{ jobs.module_local_validation_policy.outputs.root_version }}
+      example_version:
+        description: Exact Go version used for module example validation.
+        value: ${{ jobs.module_local_validation_policy.outputs.example_version }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validation_preflight:
+    name: Plan Go Validation
+    runs-on: ubuntu-latest
+    env:
+      GO_VALIDATION_MODE: ${{ inputs.go_validation_mode || 'requirements' }}
+      PYTHONDONTWRITEBYTECODE: "1"
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      root_floor_spec: ${{ steps.plan.outputs.root_floor_spec }}
+      root_spec: ${{ steps.plan.outputs.root_spec }}
+      example_spec: ${{ steps.plan.outputs.example_spec }}
+      tools_spec: ${{ steps.plan.outputs.tools_spec }}
+      validated_base: ${{ steps.current_base.outputs.sha }}
+    steps:
+      - name: Checkout validation source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+
+      - name: Require current PR base
+        id: current_base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          current_base="$(
+            git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" \
+              "refs/heads/${BASE_REF}" | awk 'NR == 1 { print $1 }'
+          )"
+          test -n "$current_base"
+          git fetch --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" "$current_base"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          if ! git merge-base --is-ancestor "$current_base" "$HEAD_SHA"; then
+            echo "PR head $HEAD_SHA does not contain current $BASE_REF ($current_base)." >&2
+            echo "Update the branch and rerun validation before merging." >&2
+            exit 1
+          fi
+          echo "sha=$current_base" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Renovate scope and release intent
+        if: github.event_name == 'pull_request'
+        env:
+          CURRENT_BASE_SHA: ${{ steps.current_base.outputs.sha }}
+        run: python3 .github/scripts/validate_renovate_pr.py --base "$CURRENT_BASE_SHA"
+
+      - name: Validate CI shell syntax
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do
+            echo "Checking shell syntax: $script"
+            bash -n "$script"
+          done < <(find .github/scripts -type f -name '*.sh' -print0 | sort -z)
+
+      - name: Test CI support tooling
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Plan repository validation
+        id: plan
+        shell: bash
+        run: bash .github/scripts/plan_go_validation.sh
+
+  root_floor_validation:
+    name: Validate Root Compatibility Floor (Go ${{ needs.validation_preflight.outputs.root_floor_spec }})
+    needs: validation_preflight
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Checkout validation source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+
+      - name: Set up root compatibility Go runtime
+        id: setup_go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ needs.validation_preflight.outputs.root_floor_spec }}
+          check-latest: true
+          cache: false
+
+      - name: Assert root compatibility Go runtime
+        env:
+          EXPECTED_VERSION: ${{ steps.setup_go.outputs.go-version }}
+        run: |
+          set -euo pipefail
+          [[ "$(go env GOVERSION)" == "go$EXPECTED_VERSION" ]]
+          [[ "$(go env GOTOOLCHAIN)" == "local" ]]
+          echo "Verified root compatibility runtime: go$EXPECTED_VERSION (GOTOOLCHAIN=local)."
+
+      - name: Test root module at its compatibility floor
+        run: go test -mod=readonly -race -count=1 ./...
+
+  validation:
+    name: Fix and Validate Code
+    needs: validation_preflight
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    outputs:
+      runtime_version: ${{ steps.runtime.outputs.version }}
+    steps:
+      - name: Checkout validation source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+
+      - name: Set up CI tools build runtime
+        id: setup_tools_go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ needs.validation_preflight.outputs.tools_spec }}
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/tools/go.sum
+
+      - name: Build declared CI tools
+        env:
+          EXPECTED_VERSION: ${{ steps.setup_tools_go.outputs.go-version }}
+        run: |
+          set -euo pipefail
+          [[ "$(go env GOVERSION)" == "go$EXPECTED_VERSION" ]]
+          export CI_TOOLS_BIN="$RUNNER_TEMP/ci-tools"
+          echo "CI_TOOLS_BIN=$CI_TOOLS_BIN" >> "$GITHUB_ENV"
+          bash .github/scripts/install_ci_tools.sh
+          "$CI_TOOLS_BIN/golangci-lint" version
+          "$CI_TOOLS_BIN/govulncheck" -version
+
+      - name: Set up preferred root Go runtime
+        id: setup_go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ needs.validation_preflight.outputs.root_spec }}
+          check-latest: true
+          cache: false
+
+      - name: Assert preferred root Go runtime
+        id: runtime
+        env:
+          EXPECTED_VERSION: ${{ steps.setup_go.outputs.go-version }}
+        run: |
+          set -euo pipefail
+          [[ "$(go env GOVERSION)" == "go$EXPECTED_VERSION" ]]
+          [[ "$(go env GOTOOLCHAIN)" == "local" ]]
+          echo "version=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Verified preferred root runtime: go$EXPECTED_VERSION (GOTOOLCHAIN=local)."
+
+      - name: Apply Go formatting
+        run: |
+          set -euo pipefail
+          mapfile -d '' root_go_files < <(
+            git ls-files -z -- ':(glob)**/*.go' ':(exclude,glob).examples/**/*.go'
+          )
+          if (( ${#root_go_files[@]} == 0 )); then
+            echo "No tracked root Go files were found." >&2
+            exit 1
+          fi
+          gofmt -w "${root_go_files[@]}"
+          "$CI_TOOLS_BIN/goimports" \
+            -local github.com/pjscruggs/slogcp-grpc \
+            -w "${root_go_files[@]}"
+
+      - name: Ensure root module metadata is tidy
+        run: go mod tidy
+
+      - name: Fix license headers
+        run: >-
+          "$CI_TOOLS_BIN/license-eye"
+          -v info -c .licenserc.yaml header fix
+
+      - name: Apply lint fixes
+        run: >-
+          "$CI_TOOLS_BIN/golangci-lint"
+          run --fix --timeout=5m ./...
+        continue-on-error: true
+
+      - name: Ensure working tree is clean
+        run: |
+          status="$(git status --porcelain)"
+          if [[ -z "$status" ]]; then
+            exit 0
+          fi
+
+          echo "Working tree has uncommitted changes after maintenance steps."
+          printf '%s\n' "$status"
+          git diff --check
+          git diff
+          exit 1
+
+      - name: Verify linting
+        run: >-
+          "$CI_TOOLS_BIN/golangci-lint"
+          run --timeout=5m ./...
+
+      - name: Verify license headers
+        run: >-
+          "$CI_TOOLS_BIN/license-eye"
+          -v info -c .licenserc.yaml header check
+
+      - name: Run root Go tests
+        run: |
+          set -euo pipefail
+          go test -race -coverprofile=coverage.out ./...
+
+      - name: Print coverage report
+        if: always()
+        run: |
+          echo "--- Test Coverage ---"
+          if [[ -f coverage.out ]]; then
+            cat coverage.out
+          else
+            echo "Coverage file (coverage.out) not found."
+          fi
+          echo "---------------------"
+
+      - name: Run root vulnerability check
+        run: '"$CI_TOOLS_BIN/govulncheck" ./...'
+
+  example_validation:
+    name: Validate Module Example
+    needs: validation_preflight
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    outputs:
+      runtime_version: ${{ steps.runtime.outputs.version }}
+    steps:
+      - name: Checkout validation source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+
+      - name: Set up example tools build runtime
+        id: setup_tools_go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ needs.validation_preflight.outputs.tools_spec }}
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            .examples/grpc/go.sum
+            .github/tools/go.sum
+
+      - name: Build example validation tools
+        env:
+          EXPECTED_VERSION: ${{ steps.setup_tools_go.outputs.go-version }}
+        run: |
+          set -euo pipefail
+          [[ "$(go env GOVERSION)" == "go$EXPECTED_VERSION" ]]
+          export CI_TOOLS_BIN="$RUNNER_TEMP/ci-tools"
+          echo "CI_TOOLS_BIN=$CI_TOOLS_BIN" >> "$GITHUB_ENV"
+          bash .github/scripts/install_ci_tools.sh goimports govulncheck
+
+      - name: Set up module example Go runtime
+        id: setup_go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ needs.validation_preflight.outputs.example_spec }}
+          check-latest: true
+          cache: false
+
+      - name: Assert module example Go runtime
+        id: runtime
+        env:
+          EXPECTED_VERSION: ${{ steps.setup_go.outputs.go-version }}
+        run: |
+          set -euo pipefail
+          [[ "$(go env GOVERSION)" == "go$EXPECTED_VERSION" ]]
+          [[ "$(go env GOTOOLCHAIN)" == "local" ]]
+          echo "version=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Verified module example runtime: go$EXPECTED_VERSION (GOTOOLCHAIN=local)."
+
+      - name: Validate module example
+        run: |
+          set -euo pipefail
+          mapfile -d '' example_go_files < <(
+            git ls-files -z -- ':(glob).examples/grpc/**/*.go'
+          )
+          if (( ${#example_go_files[@]} == 0 )); then
+            echo "No tracked Go files were found for .examples/grpc." >&2
+            exit 1
+          fi
+
+          gofmt -w "${example_go_files[@]}"
+          "$CI_TOOLS_BIN/goimports" \
+            -local github.com/pjscruggs/slogcp-grpc \
+            -w "${example_go_files[@]}"
+          (cd .examples/grpc && go mod tidy)
+          (cd .examples/grpc && go test -race -count=1 ./...)
+          (cd .examples/grpc && \
+            "$CI_TOOLS_BIN/govulncheck" ./...)
+
+      - name: Ensure module example is clean
+        run: |
+          status="$(git status --porcelain -- .examples/grpc)"
+          if [[ -z "$status" ]]; then
+            exit 0
+          fi
+
+          echo "Module example changed during validation."
+          printf '%s\n' "$status"
+          git diff --check -- .examples/grpc
+          git diff -- .examples/grpc
+          exit 1
+
+  ci_action_smoke:
+    name: Exercise Candidate CI Actions
+    needs: validation_preflight
+    uses: ./.github/workflows/ci-action-smoke.yml
+    permissions:
+      contents: read
+
+  module_local_validation_policy:
+    name: Module Local Validation Policy
+    needs:
+      - validation_preflight
+      - root_floor_validation
+      - validation
+      - example_validation
+      - ci_action_smoke
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      validation_passed: ${{ steps.evaluate.outputs.validation_passed }}
+      validated_mode: ${{ steps.evaluate.outputs.validated_mode }}
+      root_version: ${{ steps.evaluate.outputs.root_version }}
+      example_version: ${{ steps.evaluate.outputs.example_version }}
+    steps:
+      - name: Recheck validated PR identity
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          VALIDATED_BASE: ${{ needs.validation_preflight.outputs.validated_base }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const expected = context.payload.pull_request;
+            const base = process.env.VALIDATED_BASE;
+            if (!/^[0-9a-f]{40}$/.test(base || '')) {
+              throw new Error('Validation did not record a current base.');
+            }
+            const {data: run} = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: context.runId
+            });
+            if (Number(run.run_attempt) !== Number(process.env.GITHUB_RUN_ATTEMPT)) {
+              throw new Error('This validation attempt has been superseded.');
+            }
+            const {data: runs} = await github.rest.actions.listWorkflowRuns({
+              owner, repo, workflow_id: run.workflow_id,
+              event: 'pull_request', head_sha: expected.head.sha, per_page: 100
+            });
+            if (runs.workflow_runs.some(candidate =>
+              Number(candidate.id) > Number(run.id) &&
+              (candidate.pull_requests || []).some(pr => pr.number === expected.number)
+            )) {
+              throw new Error('A newer validation run exists for this PR head.');
+            }
+            const {data: pr} = await github.rest.pulls.get({
+              owner, repo, pull_number: expected.number
+            });
+            const {data: current} = await github.rest.git.getRef({
+              owner, repo, ref: `heads/${expected.base.ref}`
+            });
+            if (pr.state !== 'open' || pr.head.sha !== expected.head.sha ||
+                pr.head.repo?.full_name !== expected.head.repo.full_name ||
+                pr.base.ref !== expected.base.ref ||
+                pr.base.repo?.full_name !== `${owner}/${repo}` ||
+                current.object.sha !== base || pr.base.sha !== base) {
+              throw new Error('PR head or base changed during validation; update and rerun.');
+            }
+            core.info(`Validated current PR head ${pr.head.sha}, base ${base}, run ${run.id}, attempt ${run.run_attempt}.`);
+
+      - name: Evaluate adapter local validation result
+        id: evaluate
+        shell: bash
+        env:
+          PREFLIGHT_RESULT: ${{ needs.validation_preflight.result }}
+          FLOOR_RESULT: ${{ needs.root_floor_validation.result }}
+          ROOT_RESULT: ${{ needs.validation.result }}
+          EXAMPLE_RESULT: ${{ needs.example_validation.result }}
+          ACTION_RESULT: ${{ needs.ci_action_smoke.result }}
+          ACTION_PASSED: ${{ needs.ci_action_smoke.outputs.validation_passed }}
+          MODE: ${{ needs.validation_preflight.outputs.mode }}
+          ROOT_VERSION: ${{ needs.validation.outputs.runtime_version }}
+          EXAMPLE_VERSION: ${{ needs.example_validation.outputs.runtime_version }}
+        run: |
+          set -euo pipefail
+          failed=false
+
+          require_success() {
+            local label="$1"
+            local result="$2"
+            if [[ "$result" != "success" ]]; then
+              echo "$label expected success, got: $result" >&2
+              failed=true
+            fi
+          }
+
+          require_success "Validation preflight" "$PREFLIGHT_RESULT"
+          require_success "Root compatibility validation" "$FLOOR_RESULT"
+          require_success "Preferred root validation" "$ROOT_RESULT"
+          require_success "Module example validation" "$EXAMPLE_RESULT"
+          require_success "Candidate CI action smoke tests" "$ACTION_RESULT"
+          if [[ "$ACTION_PASSED" != "true" ]]; then
+            echo "Candidate CI actions did not report successful validation." >&2
+            failed=true
+          fi
+
+          if [[ "$MODE" != "requirements" && "$MODE" != "latest" ]]; then
+            echo "Validation preflight returned an invalid mode: $MODE" >&2
+            failed=true
+          fi
+          if [[ ! "$ROOT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Preferred root validation returned an invalid version: $ROOT_VERSION" >&2
+            failed=true
+          fi
+          if [[ ! "$EXAMPLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Module example validation returned an invalid version: $EXAMPLE_VERSION" >&2
+            failed=true
+          fi
+          if [[ "$MODE" == "latest" && "$ROOT_VERSION" != "$EXAMPLE_VERSION" ]]; then
+            echo "Latest validation used different root and example versions: root=$ROOT_VERSION example=$EXAMPLE_VERSION" >&2
+            failed=true
+          fi
+
+          if [[ "$failed" == "true" ]]; then
+            echo "validation_passed=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo "validation_passed=true" >> "$GITHUB_OUTPUT"
+          echo "validated_mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "root_version=$ROOT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "example_version=$EXAMPLE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Module validation passed in $MODE mode (root=$ROOT_VERSION example=$EXAMPLE_VERSION)."

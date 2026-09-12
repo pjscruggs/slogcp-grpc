@@ -1,0 +1,52 @@
+name: Module Candidate E2E
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Optional pull request to validate from its exact feature commit
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      pr_number:
+        type: string
+        default: ''
+
+concurrency:
+  group: module-e2e-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+jobs:
+  candidate:
+    uses: pjscruggs/slogcp/.github/workflows/module-candidate-e2e.yml@a515df353b570be270126c4acceeb3abd8aedfb6 # main
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      id-token: write
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      candidate_kind: grpc
+      expected_gcp_project_id: ${{ vars.E2E_EXPECTED_GCP_PROJECT_ID }}
+      local_check_name: Module Local Validation Policy
+    secrets: inherit
+
+  policy:
+    name: Module E2E
+    needs: candidate
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the full candidate suite
+        env:
+          CANDIDATE_RESULT: ${{ needs.candidate.result }}
+        run: test "$CANDIDATE_RESULT" = success

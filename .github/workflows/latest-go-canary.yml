@@ -1,0 +1,65 @@
+name: Latest Go Canary
+
+on:
+  pull_request:
+    branches: [ main ]
+  merge_group:
+    branches: [ main ]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate_latest_go:
+    name: Validate Latest Stable Go
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    uses: ./.github/workflows/validation_pipeline.yml
+    with:
+      go_validation_mode: latest
+
+  latest_go_policy:
+    name: Module Latest Go Policy
+    needs: validate_latest_go
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require complete latest-Go validation
+        shell: bash
+        env:
+          WORKFLOW_RESULT: ${{ needs.validate_latest_go.result }}
+          VALIDATION_PASSED: ${{ needs.validate_latest_go.outputs.validation_passed }}
+          VALIDATED_MODE: ${{ needs.validate_latest_go.outputs.validated_mode }}
+          ROOT_VERSION: ${{ needs.validate_latest_go.outputs.root_version }}
+          EXAMPLE_VERSION: ${{ needs.validate_latest_go.outputs.example_version }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$WORKFLOW_RESULT" != "success" ]]; then
+            echo "Latest-Go reusable validation expected success, got: $WORKFLOW_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$VALIDATION_PASSED" != "true" ]]; then
+            echo "Latest-Go validation did not report success: $VALIDATION_PASSED" >&2
+            exit 1
+          fi
+          if [[ "$VALIDATED_MODE" != "latest" ]]; then
+            echo "Latest-Go validation reported the wrong mode: $VALIDATED_MODE" >&2
+            exit 1
+          fi
+          if [[ ! "$ROOT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Latest-Go validation reported an invalid root version: $ROOT_VERSION" >&2
+            exit 1
+          fi
+          if [[ "$ROOT_VERSION" != "$EXAMPLE_VERSION" ]]; then
+            echo "Latest-Go root and example versions differ: root=$ROOT_VERSION example=$EXAMPLE_VERSION" >&2
+            exit 1
+          fi
+
+          echo "Latest stable Go $ROOT_VERSION passed complete module validation."
