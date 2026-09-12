@@ -10,7 +10,7 @@ This optional module uses Google's official [Cloud Logging client](https://pkg.g
 go get github.com/pjscruggs/slogcp-grpc
 ```
 
-Requires Go 1.27 or later and `github.com/pjscruggs/slogcp/v2`.
+Check [go.mod](go.mod) for the required Go toolchain and `slogcp` dependency.
 
 ## Use
 
