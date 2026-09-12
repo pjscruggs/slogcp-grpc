@@ -75,13 +75,15 @@ Enable `slogcp.WithSourceLocationEnabled(true)` to capture the original logging 
 
 ## Delivery and shutdown
 
-The official client owns the delivery buffer. An additional `slogcp.WithAsync` queue is usually unnecessary. If you enable one, close the handler before flushing the exporter.
+The official client owns the delivery buffer. An additional `slogcp.WithAsync` queue is usually unnecessary. If you enable one, finish draining or aborting the handler before flushing the exporter or closing the client.
 
 `Export` reports conversion and callback errors immediately. Buffered client validation, overflow, and delivery errors reach `Client.OnError` and the error returned by `Flush` or `Client.Close`. Set `OnError` before creating loggers. Its callback should return quickly. The client's flush summary can include errors from other loggers sharing that client.
 
-`WithSynchronous()` makes each export wait for `logging.Logger.LogSync` using the record context. This bypasses batching. Direct calls to `Handler.Handle` receive delivery errors. Ordinary `slog.Logger` methods discard handler errors.
+`WithSynchronous()` makes each export wait for `logging.Logger.LogSync` using the record context. This bypasses the client's batch buffer. Direct calls to `Handler.Handle` receive delivery errors when the handler has no async queue. With `slogcp.WithAsync`, `Handle` returns after enqueue and exporter errors go to the writer configured by `slogcpasync.WithErrorWriter`. Ordinary `slog.Logger` methods discard handler errors.
 
 Stop producers, call `handler.Close`, then `exporter.Flush`, and finally `client.Close`. Check every error. Closing the handler leaves the borrowed logger and client open. `Flush` uses the supplied logger's RPC deadlines and leaves it available for further logs.
+
+With `slogcp.WithCloseTimeoutPolicy(slogcp.CloseTimeoutReturn)`, a `Close` timeout leaves workers running. Keep the client open until a later `Shutdown` succeeds or `Abort(context.Background())` finishes. A timed-out `Abort` can also leave workers running.
 
 ## Validation
 
