@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -180,6 +181,64 @@ func TestBufferedMetadataAndOwnership(t *testing.T) {
 }
 
 type contextKey struct{}
+
+// TestHandlerPromotesHTTPRequest verifies HTTP enrichment reaches the API field
+// through ordinary and asynchronous slogcp handlers without attribute replacement.
+func TestHandlerPromotesHTTPRequest(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		name := "direct"
+		if async {
+			name = "async"
+		}
+		t.Run(name, func(t *testing.T) {
+			server := new(recordingServer)
+			client, _ := newTestClient(t, server)
+			exporter, err := NewExporter(newTestLogger(client))
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := []slogcp.Option{slogcp.WithSourceLocationEnabled(false)}
+			if async {
+				opts = append(opts, slogcp.WithAsync())
+			}
+			handler, err := slogcp.NewHandlerWithExporter(exporter, opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequestWithContext(context.Background(), "POST", "https://example.com/jobs?q=1", nil)
+			request.Header.Set("User-Agent", "grpc-exporter-test")
+			request.RemoteAddr = "192.0.2.1:1234"
+			record := slog.NewRecord(time.Now(), slog.LevelInfo, "request", 0)
+			record.AddAttrs(slog.Any("httpRequest", &slogcp.HTTPRequest{
+				Request: request, Status: 201, ResponseSize: 42, Latency: 5 * time.Millisecond,
+			}))
+			if err := handler.Handle(context.Background(), record); err != nil {
+				t.Fatal(err)
+			}
+			if err := handler.Shutdown(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if err := exporter.Flush(); err != nil {
+				t.Fatal(err)
+			}
+			entries := appEntries(server.snapshot())
+			if len(entries) != 1 {
+				t.Fatalf("received %d entries", len(entries))
+			}
+			entry := entries[0]
+			if _, exists := entry.GetJsonPayload().AsMap()["httpRequest"]; exists {
+				t.Error("HTTP metadata remains in the application payload")
+			}
+			httpRequest := entry.HttpRequest
+			if httpRequest.GetRequestMethod() != "POST" || httpRequest.GetRequestUrl() != "https://example.com/jobs?q=1" ||
+				httpRequest.GetStatus() != 201 || httpRequest.GetResponseSize() != 42 ||
+				httpRequest.GetLatency().AsDuration() != 5*time.Millisecond ||
+				httpRequest.GetRemoteIp() != "192.0.2.1" || httpRequest.GetUserAgent() != "grpc-exporter-test" {
+				t.Fatalf("HTTP metadata did not reach the API field %v", httpRequest)
+			}
+		})
+	}
+}
 
 func TestHandlerConcurrentClonesAndShutdown(t *testing.T) {
 	server := new(recordingServer)
