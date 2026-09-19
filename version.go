@@ -15,4 +15,4 @@
 package slogcpgrpc
 
 // Version is the module version.
-const Version = "v1.0.0"
+const Version = "v1.0.1"
