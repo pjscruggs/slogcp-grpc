@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import textwrap
 import unittest
 import urllib.error
@@ -38,11 +39,13 @@ class ReleaseIntentTests(unittest.TestCase):
         values = {
             ("rev-parse", "HEAD"): SHA,
             ("rev-parse", SHA + "^"): PARENT,
+            ("rev-list", "--first-parent", SHA): SHA + "\n" + PARENT,
             ("show", SHA + ":version.go"): f'var Version = "{current}"',
             ("show", PARENT + ":version.go"): f'var Version = "{previous}"',
         }
         with patch.object(policy, "git", side_effect=lambda *args: values[args]):
-            return policy.plan(event, "refs/heads/main", SHA, requested)
+            return policy.plan(event, "refs/heads/main", SHA, requested,
+                               push_before=PARENT, push_after=SHA)
 
     def test_semantic_patch_and_human_minor_transition(self):
         self.assertEqual(self.check(), {"should_release": "true", "version": "v1.2.4"})
@@ -85,6 +88,108 @@ class ReleaseIntentTests(unittest.TestCase):
         ):
             with self.subTest(event=event, ref=ref), self.assertRaises(ValueError):
                 policy.plan(event, ref, SHA)
+
+
+class ReleasePushRangeTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.repo = Path(self.temporary.name)
+        self.git("init", "--quiet")
+        self.write("README.md", "Fixture\n")
+
+    def git(self, *args):
+        return subprocess.run(
+            ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+             "-c", "commit.gpgsign=false", *args],
+            cwd=self.repo, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    def write(self, path, content):
+        (self.repo / path).write_text(content, encoding="utf-8")
+
+    def commit(self, *parents):
+        self.git("add", ".")
+        arguments = ["commit-tree", self.git("write-tree"), "-m", "fixture"]
+        for parent in parents:
+            arguments.extend(["-p", parent])
+        sha = self.git(*arguments)
+        self.git("update-ref", "HEAD", sha)
+        return sha
+
+    def library(self, version):
+        self.write("go.mod", "module example.invalid/module\n\ngo 1.27.0\n")
+        self.write("version.go", f'package fixture\nvar Version = "{version}"\n')
+
+    def plan(self, before, after=None, **kwargs):
+        sha = self.git("rev-parse", "HEAD")
+        with patch.object(policy, "git", side_effect=self.git):
+            return policy.plan("push", "refs/heads/main", sha,
+                               push_before=before, push_after=after or sha, **kwargs)
+
+    def test_multicommit_push_releases_final_source_version(self):
+        self.library("v1.0.0")
+        before = self.commit()
+        self.library("v1.0.1")
+        bump = self.commit(before)
+        self.write("README.md", "Updated runner configuration\n")
+        head = self.commit(bump)
+        self.assertEqual(self.plan(before), {"should_release": "true", "version": "v1.0.1"})
+        self.assertEqual(self.plan(bump), {"should_release": "false"})
+        with patch.object(policy, "git", side_effect=self.git):
+            with self.assertRaisesRegex(ValueError, "original release workflow"):
+                policy.plan("workflow_dispatch", "refs/heads/main", head)
+
+    def test_initial_module_can_span_commits_without_a_previous_version(self):
+        before = self.commit()
+        self.library("v1.0.0")
+        initial = self.commit(before)
+        self.library("v1.0.1")
+        bump = self.commit(initial)
+        self.write("README.md", "Pin validated runner\n")
+        self.commit(bump)
+        self.assertEqual(self.plan(before), {"should_release": "true", "version": "v1.0.1"})
+
+    def test_existing_module_cannot_omit_baseline_version(self):
+        self.write("go.mod", "module example.invalid/module\n")
+        before = self.commit()
+        self.library("v1.0.1")
+        self.commit(before)
+        with self.assertRaisesRegex(ValueError, "must declare its prior Version"):
+            self.plan(before)
+
+    def test_push_must_supply_exact_nonempty_immutable_boundaries(self):
+        self.library("v1.0.0")
+        before = self.commit()
+        self.library("v1.0.1")
+        head = self.commit(before)
+        for baseline in ("", "0" * 40, "main", head):
+            with self.subTest(before=baseline), self.assertRaisesRegex(
+                ValueError, "exact before and after"
+            ):
+                self.plan(baseline)
+        with self.assertRaisesRegex(ValueError, "exact before and after"):
+            self.plan(before, after=before)
+        with patch.object(policy, "git", side_effect=self.git):
+            with self.assertRaisesRegex(ValueError, "exact before and after"):
+                policy.plan("push", "refs/heads/main", head, push_before=before)
+
+    def test_regression_and_unrelated_baselines_fail_closed(self):
+        self.library("v1.0.1")
+        before = self.commit()
+        self.library("v1.0.0")
+        head = self.commit(before)
+        with self.assertRaisesRegex(ValueError, "must advance"):
+            self.plan(before)
+        unrelated = self.git("commit-tree", self.git("write-tree"), "-m", "unrelated")
+        for baseline in (unrelated, "f" * 40):
+            with self.subTest(before=baseline), self.assertRaisesRegex(
+                ValueError, "first-parent ancestor"
+            ):
+                self.plan(baseline)
+        self.commit(head, unrelated)
+        with self.assertRaisesRegex(ValueError, "first-parent ancestor"):
+            self.plan(unrelated)
 
 
 class GitHubReadTests(unittest.TestCase):

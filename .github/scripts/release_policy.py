@@ -47,13 +47,24 @@ def git(*args: str) -> str:
     ).stdout.strip()
 
 
-def plan(event: str, ref: str, sha: str, requested: str = "") -> dict[str, str]:
+def plan(event: str, ref: str, sha: str, requested: str = "", *,
+         push_before: str = "", push_after: str = "") -> dict[str, str]:
     if event not in {"push", "workflow_dispatch"} or ref != "refs/heads/main":
         raise ValueError("Releases must use a main-branch push or manual run")
     if not re.fullmatch(r"[0-9a-f]{40}", sha) or git("rev-parse", "HEAD") != sha:
         raise ValueError("Checkout does not match the immutable workflow SHA")
     current = version_of(git("show", f"{sha}:version.go"))
-    parent = git("rev-parse", f"{sha}^")
+    if event == "push":
+        # A fast-forward push can include a Version bump before its final commit.
+        if (not re.fullmatch(r"[0-9a-f]{40}", push_before)
+                or push_before == "0" * 40 or push_before == sha
+                or push_after != sha):
+            raise ValueError("Release push must identify its exact before and after commits")
+        if push_before not in git("rev-list", "--first-parent", sha).splitlines():
+            raise ValueError("Release push baseline must be a first-parent ancestor")
+        parent = push_before
+    else:
+        parent = git("rev-parse", f"{sha}^")
     try:
         previous = version_of(git("show", f"{parent}:version.go"))
     except subprocess.CalledProcessError:
@@ -192,6 +203,8 @@ def main() -> None:
             os.environ["GITHUB_REF"],
             os.environ["GITHUB_SHA"],
             os.environ.get("INPUT_VERSION", ""),
+            push_before=os.environ.get("PUSH_BEFORE", ""),
+            push_after=os.environ.get("PUSH_AFTER", ""),
         )
     else:
         client = GitHub(os.environ["GITHUB_REPOSITORY"], os.environ["GH_TOKEN"])

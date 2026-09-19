@@ -41,6 +41,8 @@ jobs:
         id: intent
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
         run: python .github/scripts/release_policy.py plan
 
   release_preflight:
