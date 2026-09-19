@@ -7,7 +7,7 @@ toolchain go1.27.1
 require (
 	cloud.google.com/go/logging v1.19.1
 	github.com/pjscruggs/slogcp-grpc v0.0.0-unpublished
-	github.com/pjscruggs/slogcp/v2 v2.0.0-20260912111130-6c625f7e5df6
+	github.com/pjscruggs/slogcp/v2 v2.0.0
 )
 
 replace github.com/pjscruggs/slogcp-grpc => ../..
