@@ -46,8 +46,6 @@ github.com/googleapis/enterprise-certificate-proxy v0.3.17 h1:73NfMHdiqo9JFU9+7a
 github.com/googleapis/enterprise-certificate-proxy v0.3.17/go.mod h1:rSEsBUemEBZEexP2y6jPp16LUmUbjmSbcPMQizR0o4k=
 github.com/googleapis/gax-go/v2 v2.23.0 h1:Tchl7qkvE7Ip3y+ztvNufYFvkfqTe7NfLTYGIdJRLuE=
 github.com/googleapis/gax-go/v2 v2.23.0/go.mod h1:rBQKOVJCdb8IFEzg+FCwlt1LP/xMDGuqUXhUG+XMXEg=
-github.com/pjscruggs/slogcp-grpc v0.0.0-20260912111453-931bb73e7329 h1:h9WFnWVsXNze+ASnw86mM6GYiMSBk3vopKLxDuLYsqc=
-github.com/pjscruggs/slogcp-grpc v0.0.0-20260912111453-931bb73e7329/go.mod h1:f3zGHk3FU3X02OWOCUgUszd5bYoApdhD0q3ZvMeTH6U=
 github.com/pjscruggs/slogcp/v2 v2.0.0-20260912111130-6c625f7e5df6 h1:72OP3OXulfk5TK4N56RVfXNJftBnBDS1d5ivFaorkVk=
 github.com/pjscruggs/slogcp/v2 v2.0.0-20260912111130-6c625f7e5df6/go.mod h1:uIlMejEucy2TCNXMLhrqFzPvyBQNkidXF7wnUrTl2iY=
 github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 h1:GFCKgmp0tecUJ0sJuv4pzYCqS9+RGSn52M3FUwPs+uo=

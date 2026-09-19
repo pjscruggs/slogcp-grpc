@@ -40,6 +40,7 @@ class RenovatePolicyTests(unittest.TestCase):
         cls.config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
         cls.package_rules = cls.config["packageRules"]
         cls.tools_go_mod = (ROOT / ".github/tools/go.mod").read_text(encoding="utf-8")
+        cls.example_go_mod = (ROOT / ".examples/grpc/go.mod").read_text(encoding="utf-8")
 
     def find_rule(self, description: str) -> dict:
         for rule in self.package_rules:
@@ -252,15 +253,23 @@ class RenovatePolicyTests(unittest.TestCase):
             self.assertEqual(rule["automergeStrategy"], "squash")
             self.assertNotIn("bumpVersions", rule)
 
-    def test_examples_keep_local_adapter_requirement_pinned(self) -> None:
+    def test_examples_keep_local_module_requirement_pinned(self) -> None:
         rule = self.find_rule(
-            "Do not update the local unpublished adapter requirement used by examples"
+            "Do not update the local unpublished module requirement used by examples"
         )
         self.assertEqual(
             rule["matchPackageNames"],
             ["github.com/pjscruggs/slogcp-grpc"],
         )
         self.assertFalse(rule["enabled"])
+        self.assertRegex(
+            self.example_go_mod,
+            r"(?m)^\s*github\.com/pjscruggs/slogcp-grpc v0\.0\.0-unpublished$",
+        )
+        self.assertRegex(
+            self.example_go_mod,
+            r"(?m)^replace github\.com/pjscruggs/slogcp-grpc => \.\./\.\.$",
+        )
 
 
 if __name__ == "__main__":

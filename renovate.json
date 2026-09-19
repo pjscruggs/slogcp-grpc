@@ -381,7 +381,7 @@
       ]
     },
     {
-      "description": "Do not update the local unpublished adapter requirement used by examples",
+      "description": "Do not update the local unpublished module requirement used by examples",
       "matchManagers": [
         "gomod"
       ],
