@@ -239,6 +239,9 @@ jobs:
           "$CI_TOOLS_BIN/golangci-lint"
           run --timeout=5m ./...
 
+      - name: Verify Go documentation and tracked file coverage
+        run: python3 .github/scripts/check_godoc.py "$CI_TOOLS_BIN/godoclint"
+
       - name: Verify license headers
         run: >-
           "$CI_TOOLS_BIN/license-eye"
