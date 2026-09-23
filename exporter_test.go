@@ -40,6 +40,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// recordingServer captures Cloud Logging write requests for assertions.
 type recordingServer struct {
 	logpb.UnimplementedLoggingServiceV2Server
 	mu       sync.Mutex
@@ -48,6 +49,7 @@ type recordingServer struct {
 	discard  bool
 }
 
+// WriteLogEntries records a write request and returns a successful response.
 func (s *recordingServer) WriteLogEntries(_ context.Context, request *logpb.WriteLogEntriesRequest) (*logpb.WriteLogEntriesResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -57,12 +59,14 @@ func (s *recordingServer) WriteLogEntries(_ context.Context, request *logpb.Writ
 	return &logpb.WriteLogEntriesResponse{}, s.err
 }
 
+// snapshot returns the write requests captured so far.
 func (s *recordingServer) snapshot() []*logpb.WriteLogEntriesRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]*logpb.WriteLogEntriesRequest(nil), s.requests...)
 }
 
+// newTestClient starts an in-process logging server and returns its client.
 func newTestClient(t testing.TB, server *recordingServer) (*logging.Client, <-chan error) {
 	t.Helper()
 	listener := bufconn.Listen(1 << 20)
@@ -88,6 +92,7 @@ func newTestClient(t testing.TB, server *recordingServer) (*logging.Client, <-ch
 	return client, observedErrors
 }
 
+// newTestLogger creates a Cloud Logging logger for a test client.
 func newTestLogger(client *logging.Client, opts ...logging.LoggerOption) *logging.Logger {
 	defaults := []logging.LoggerOption{
 		logging.CommonResource(&mrpb.MonitoredResource{Type: "global", Labels: map[string]string{"project_id": "test-project"}}),
@@ -99,6 +104,7 @@ func newTestLogger(client *logging.Client, opts ...logging.LoggerOption) *loggin
 	return client.Logger("application", append(defaults, opts...)...)
 }
 
+// appEntries flattens application log entries from recorded requests.
 func appEntries(requests []*logpb.WriteLogEntriesRequest) []*logpb.LogEntry {
 	var result []*logpb.LogEntry
 	for _, request := range requests {
@@ -111,6 +117,7 @@ func appEntries(requests []*logpb.WriteLogEntriesRequest) []*logpb.LogEntry {
 	return result
 }
 
+// TestBufferedMetadataAndOwnership checks buffered metadata conversion and entry ownership.
 func TestBufferedMetadataAndOwnership(t *testing.T) {
 	server := new(recordingServer)
 	client, _ := newTestClient(t, server)
@@ -179,8 +186,10 @@ func TestBufferedMetadataAndOwnership(t *testing.T) {
 	}
 }
 
+// contextKey identifies a test value carried through context.
 type contextKey struct{}
 
+// TestHandlerConcurrentClonesAndShutdown checks concurrent handler clones and shutdown.
 func TestHandlerConcurrentClonesAndShutdown(t *testing.T) {
 	server := new(recordingServer)
 	client, _ := newTestClient(t, server)
@@ -231,6 +240,7 @@ func TestHandlerConcurrentClonesAndShutdown(t *testing.T) {
 	}
 }
 
+// TestBufferedDeliveryErrors checks delivery errors reported by buffered writes.
 func TestBufferedDeliveryErrors(t *testing.T) {
 	server := &recordingServer{err: status.Error(codes.PermissionDenied, "denied")}
 	client, observedErrors := newTestClient(t, server)
@@ -254,6 +264,7 @@ func TestBufferedDeliveryErrors(t *testing.T) {
 	}
 }
 
+// TestClientCloseReportsDeliveryError checks errors reported when closing the client.
 func TestClientCloseReportsDeliveryError(t *testing.T) {
 	client, _ := newTestClient(t, &recordingServer{err: status.Error(codes.PermissionDenied, "denied")})
 	exporter, err := NewExporter(newTestLogger(client))
@@ -268,6 +279,7 @@ func TestClientCloseReportsDeliveryError(t *testing.T) {
 	}
 }
 
+// TestSynchronousDeliveryAndCancellation checks synchronous delivery and cancellation.
 func TestSynchronousDeliveryAndCancellation(t *testing.T) {
 	server := &recordingServer{err: status.Error(codes.PermissionDenied, "denied")}
 	client, _ := newTestClient(t, server)
@@ -286,6 +298,7 @@ func TestSynchronousDeliveryAndCancellation(t *testing.T) {
 	}
 }
 
+// TestConversionAndMutationErrors checks entry conversion and mutator failures.
 func TestConversionAndMutationErrors(t *testing.T) {
 	server := new(recordingServer)
 	client, _ := newTestClient(t, server)
@@ -321,6 +334,7 @@ func TestConversionAndMutationErrors(t *testing.T) {
 	}
 }
 
+// TestBufferedLimitErrors checks errors when buffered writes exceed limits.
 func TestBufferedLimitErrors(t *testing.T) {
 	client, observedErrors := newTestClient(t, new(recordingServer))
 	exporter, err := NewExporter(newTestLogger(client, logging.EntryByteLimit(1)))
@@ -343,6 +357,7 @@ func TestBufferedLimitErrors(t *testing.T) {
 	}
 }
 
+// TestMutatorProtoOwnershipAndOrder checks mutator ordering and protobuf ownership.
 func TestMutatorProtoOwnershipAndOrder(t *testing.T) {
 	server := new(recordingServer)
 	client, _ := newTestClient(t, server)
@@ -377,6 +392,7 @@ func TestMutatorProtoOwnershipAndOrder(t *testing.T) {
 	}
 }
 
+// TestSpecialPayloadFields checks conversion of special payload fields.
 func TestSpecialPayloadFields(t *testing.T) {
 	server := new(recordingServer)
 	client, _ := newTestClient(t, server)
@@ -410,6 +426,7 @@ func TestSpecialPayloadFields(t *testing.T) {
 	}
 }
 
+// TestConstructionAndSeverity checks exporter construction and severity mapping.
 func TestConstructionAndSeverity(t *testing.T) {
 	if _, err := NewExporter(nil); err == nil {
 		t.Fatal("nil logger accepted")
