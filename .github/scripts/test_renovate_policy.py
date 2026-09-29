@@ -31,7 +31,6 @@ COMPILER_TOOLS = {
 }
 AUXILIARY_TOOLS = {
     "github.com/apache/skywalking-eyes",
-    "github.com/godoc-lint/godoc-lint",
 }
 
 

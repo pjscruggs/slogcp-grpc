@@ -165,8 +165,7 @@
         "go"
       ],
       "matchPackageNames": [
-        "github.com/apache/skywalking-eyes",
-        "github.com/godoc-lint/godoc-lint"
+        "github.com/apache/skywalking-eyes"
       ],
       "matchFileNames": [
         ".github/tools/go.mod"
