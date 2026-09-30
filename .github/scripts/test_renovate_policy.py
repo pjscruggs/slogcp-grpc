@@ -156,6 +156,7 @@ class RenovatePolicyTests(unittest.TestCase):
         )
         expected_tools = {
             "github.com/apache/skywalking-eyes/cmd/license-eye",
+            "github.com/godoc-lint/godoc-lint/cmd/godoclint",
             "github.com/golangci/golangci-lint/v2/cmd/golangci-lint",
             "golang.org/x/tools/cmd/goimports",
             "golang.org/x/vuln/cmd/govulncheck",

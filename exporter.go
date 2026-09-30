@@ -151,6 +151,7 @@ func (e *Exporter) Flush() error {
 	return nil
 }
 
+// convertEntry maps an slogcp entry to a Cloud Logging entry.
 func convertEntry(source slogcp.Entry) (logging.Entry, error) {
 	entry := logging.Entry{}
 	payloadFields := source.Payload
@@ -198,6 +199,7 @@ func convertEntry(source slogcp.Entry) (logging.Entry, error) {
 	return entry, nil
 }
 
+// snapshotMetadata copies mutable metadata before the client queues the entry.
 func snapshotMetadata(entry *logging.Entry) {
 	entry.Labels = maps.Clone(entry.Labels)
 	if entry.Operation != nil {
@@ -221,6 +223,7 @@ func snapshotMetadata(entry *logging.Entry) {
 	}
 }
 
+// convertHTTPRequest converts structured request fields to Cloud Logging HTTP metadata.
 func convertHTTPRequest(fields map[string]any) (*logging.HTTPRequest, error) {
 	data, err := json.Marshal(fields)
 	if err != nil {
@@ -252,8 +255,9 @@ func convertHTTPRequest(fields map[string]any) (*logging.HTTPRequest, error) {
 	}, nil
 }
 
-// Custom levels use the severity of the next lower named level. Values below
-// Debug use Debug. LevelDefault and larger values use Default.
+// severity maps an slog level to a Cloud Logging severity. Custom levels use
+// the severity of the next lower named level; values below Debug use Debug,
+// while LevelDefault and larger values use Default.
 func severity(level slog.Level) logging.Severity {
 	switch {
 	case level >= slogcp.LevelDefault.Level():

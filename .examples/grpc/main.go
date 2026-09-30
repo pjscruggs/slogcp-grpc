@@ -30,12 +30,14 @@ import (
 	slogcpgrpc "github.com/pjscruggs/slogcp-grpc"
 )
 
+// main runs the Cloud Logging gRPC exporter example.
 func main() {
 	if err := run(context.Background()); err != nil {
 		log.Fatal(err)
 	}
 }
 
+// run creates the client and sends an example log entry.
 func run(ctx context.Context) (result error) {
 	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
 	if projectID == "" {
