@@ -224,7 +224,7 @@ class WorkflowPolicyTests(unittest.TestCase):
         references: set[str] = set()
         for source in WORKFLOW_SOURCES.values():
             references.update(
-                re.findall(r"\.github/scripts/[A-Za-z0-9_.\-/]+", source)
+                re.findall(r"(?<![A-Za-z0-9_./-])\.github/scripts/[A-Za-z0-9_.\-/]+", source)
             )
 
         self.assertTrue(references)
