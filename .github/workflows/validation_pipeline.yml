@@ -98,6 +98,41 @@ jobs:
         shell: bash
         run: bash .github/scripts/plan_go_validation.sh
 
+      - name: Checkout reviewed shared dependency policy
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pjscruggs/slogcp
+          ref: b0f69e0875d428aa28b94f48ffb2b7a3f9d5bdad
+          path: .selected-graph-policy
+          persist-credentials: false
+
+      - name: Set up selected graph resolver
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: stable
+          check-latest: true
+          cache: false
+
+      - name: Prove Renovate root security repair
+        if: github.event_name == 'pull_request'
+        env:
+          CURRENT_BASE_SHA: ${{ steps.current_base.outputs.sha }}
+          GOTOOLCHAIN: local
+        run: |
+          python3 .selected-graph-policy/.github/scripts/validate_optional_security_graph.py \
+            --repository "$GITHUB_WORKSPACE" --base "$CURRENT_BASE_SHA" \
+            --report "$RUNNER_TEMP/security-graph.json"
+
+      - name: Retain security graph evidence
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: security-graph-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-graph.json
+          if-no-files-found: ignore
+
   root_floor_validation:
     name: Validate Root Compatibility Floor (Go ${{ needs.validation_preflight.outputs.root_floor_spec }})
     needs: validation_preflight
