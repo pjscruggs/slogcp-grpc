@@ -3,7 +3,7 @@ name: Module Candidate E2E
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, reopened, synchronize, labeled]
+    types: [opened, reopened, synchronize]
   workflow_dispatch:
     inputs:
       pr_number:

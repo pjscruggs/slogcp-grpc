@@ -44,6 +44,18 @@ TOOLS_INSTALLER = (ROOT / ".github/scripts/install_ci_tools.sh").read_text(encod
 ACTION_SMOKE = WORKFLOW_SOURCES["ci-action-smoke.yml"]
 
 
+class CandidateE2ETriggerTests(unittest.TestCase):
+    def test_labels_do_not_start_duplicate_candidate_runs(self):
+        workflow = WORKFLOW_SOURCES["module-e2e.yml"]
+        events = re.search(r"types:\s*\[([^\]]+)\]", workflow)
+        self.assertIsNotNone(events)
+        self.assertEqual(
+            [event.strip() for event in events.group(1).split(",")],
+            ["opened", "reopened", "synchronize"],
+        )
+        self.assertIn("workflow_dispatch:", workflow)
+
+
 def validate_release_checkout_pins(release: str, validation: str) -> None:
     pattern = r"^\s*(?:-\s*)?uses:\s*['\"]?actions/checkout@([^\s'\"]+)"
     release_pins = re.findall(pattern, release, flags=re.MULTILINE)
