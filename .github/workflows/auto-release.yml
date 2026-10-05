@@ -77,6 +77,8 @@ jobs:
       contents: write
     env:
       VERSION: ${{ needs.release_intent.outputs.version }}
+      RELEASE_SIGNER_EMAIL: ${{ vars.RELEASE_SIGNER_EMAIL }}
+      RELEASE_SSH_PUBLIC_KEY: ${{ secrets.RELEASE_SSH_PUBLIC_KEY }}
     steps:
       - name: Require Successful Release Validation
         env:
