@@ -98,6 +98,36 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Checkout reviewed dependency policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pjscruggs/slogcp
+          ref: 63eaa12a29f6b82b5c237f8d59a54dd2c484744b
+          path: .selected-graph-policy
+          persist-credentials: false
+
+      - name: Set up release graph resolver
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: stable
+          check-latest: true
+          cache: false
+
+      - name: Require fresh clean selected graphs before signing
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          python3 .selected-graph-policy/.github/scripts/selected_graph_policy.py \
+            --root "$GITHUB_WORKSPACE" --report "$RUNNER_TEMP/release-graph.json"
+
+      - name: Retain release graph evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-graph-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-graph.json
+          if-no-files-found: ignore
+
       - name: Check Existing Tag
         id: tag_state
         env:
