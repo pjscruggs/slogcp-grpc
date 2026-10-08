@@ -1,8 +1,6 @@
 module github.com/pjscruggs/slogcp-grpc/.examples/grpc
 
-go 1.27.0
-
-toolchain go1.27.1
+go 1.27.1
 
 require (
 	cloud.google.com/go/logging v1.19.1
