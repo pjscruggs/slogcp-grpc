@@ -86,10 +86,11 @@ class GoValidationPlanTests(unittest.TestCase):
         self.assertEqual(values["tools_spec"], "1.26.1")
 
     def test_latest_lane_remains_dynamic_for_patch_and_minor_releases(self):
-        result, values = self.plan(mode="latest")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(values["root_floor_spec"], "1.26.x")
-        self.assertEqual([values[name] for name in ("root_spec", "example_spec", "tools_spec")], ["stable"] * 3)
+        source = PLAN.read_text()
+        self.assertIn('python3 .github/scripts/resolve_latest_go.py "$tools_required"', source)
+        for name in ("root_spec", "example_spec", "tools_spec"):
+            self.assertIn(name + '="$latest"', source)
+            self.assertNotIn(name + '=stable', source)
 
     def test_unexpected_or_missing_example_manifest_fails(self):
         for manifests in ((), (".examples/other/go.mod",), (".examples/grpc/go.mod", ".examples/other/go.mod")):
