@@ -70,9 +70,10 @@ case "$GO_VALIDATION_MODE" in
     tools_spec="$tools_required"
     ;;
   latest)
-    root_spec=stable
-    example_spec=stable
-    tools_spec=stable
+    latest="$(python3 .github/scripts/resolve_latest_go.py "$tools_required")"
+    root_spec="$latest"
+    example_spec="$latest"
+    tools_spec="$latest"
     ;;
   *)
     echo "Unsupported Go validation mode: $GO_VALIDATION_MODE" >&2

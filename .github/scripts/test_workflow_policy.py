@@ -98,6 +98,17 @@ class WorkflowPolicyTests(unittest.TestCase):
             self.assertLess(AUTO_RELEASE.index(marker), AUTO_RELEASE.index(operation))
         self.assertIn("name: Retain release graph evidence", AUTO_RELEASE)
 
+    def test_release_graph_uses_the_reviewed_validation_policy(self):
+        def policy_ref(workflow):
+            return re.search(
+                r"repository: pjscruggs/slogcp\s+ref: ([a-f0-9]{40})\s+"
+                r"path: \.selected-graph-policy", workflow
+            ).group(1)
+
+        self.assertEqual(policy_ref(AUTO_RELEASE), policy_ref(VALIDATION))
+        upload = re.search(r"uses: actions/upload-artifact@([a-f0-9]{40})", AUTO_RELEASE)
+        self.assertIn(f"actions/upload-artifact@{upload.group(1)}", VALIDATION)
+
     def test_release_requires_explicit_version_intent(self) -> None:
         self.assertIn("paths: [ version.go ]", AUTO_RELEASE)
         self.assertIn("python .github/scripts/release_policy.py plan", AUTO_RELEASE)
