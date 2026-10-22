@@ -57,18 +57,18 @@ class GoValidationPlanTests(unittest.TestCase):
         result, values = self.plan()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(values, {"mode": "requirements", "root_floor_spec": "1.26.x",
-                                 "root_spec": "1.27.0", "example_spec": "1.27.1", "tools_spec": "1.27.1"})
+                                 "root_spec": "1.27.x", "example_spec": "1.27.x", "tools_spec": "1.27.x"})
 
     def test_future_tools_minimum_is_independent_of_the_root(self):
         result, values = self.plan(tools="go 1.30.2\n")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(values["root_spec"], "1.27.0")
+        self.assertEqual(values["root_spec"], "1.27.x")
         self.assertEqual(values["root_floor_spec"], "1.26.x")
-        self.assertEqual(values["tools_spec"], "1.30.2")
+        self.assertEqual(values["tools_spec"], "1.30.x")
 
     def test_toolchain_preferences_participate_in_tools_build_selection(self):
-        for tools, example, expected in (("go 1.26\ntoolchain go1.29.1\n", "go 1.28.0\n", "1.29.1"),
-                                         ("go 1.26\n", "go 1.28\ntoolchain go1.29.3\n", "1.29.3")):
+        for tools, example, expected in (("go 1.26\ntoolchain go1.29.1\n", "go 1.28.0\n", "1.29.x"),
+                                         ("go 1.26\n", "go 1.28\ntoolchain go1.29.3\n", "1.29.x")):
             with self.subTest(expected=expected):
                 result, values = self.plan(tools=tools, example=example)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -77,13 +77,20 @@ class GoValidationPlanTests(unittest.TestCase):
     def test_root_preference_can_be_the_newest_tools_build_requirement(self):
         result, values = self.plan(root="go 1.26\ntoolchain go1.31.4\n")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(values["tools_spec"], "1.31.4")
+        self.assertEqual(values["tools_spec"], "1.31.x")
 
     def test_missing_preferences_use_module_requirements(self):
         result, values = self.plan(root="go 1.26\n", example="go 1.26.1\n")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(values["root_spec"], "1.26.0")
-        self.assertEqual(values["tools_spec"], "1.26.1")
+        self.assertEqual(values["root_spec"], "1.26.x")
+        self.assertEqual(values["tools_spec"], "1.26.x")
+
+    def test_security_patch_updates_do_not_wait_for_example_directive_updates(self):
+        result, values = self.plan(root="go 1.27.0\ntoolchain go1.27.3\n",
+                                   example="go 1.27.2\n", tools="go 1.27.0\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ("root_spec", "example_spec", "tools_spec"):
+            self.assertEqual(values[name], "1.27.x")
 
     def test_latest_lane_remains_dynamic_for_patch_and_minor_releases(self):
         source = PLAN.read_text()

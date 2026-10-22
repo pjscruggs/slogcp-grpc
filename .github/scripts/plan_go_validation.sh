@@ -65,9 +65,10 @@ tools_required="$(printf '%s\n' "$root_preferred" "$example_preferred" "$tools_p
 
 case "$GO_VALIDATION_MODE" in
   requirements)
-    root_spec="$root_preferred"
-    example_spec="$example_preferred"
-    tools_spec="$tools_required"
+    # Follow security patch releases within each declared Go series.
+    root_spec="${root_preferred%.*}.x"
+    example_spec="${example_preferred%.*}.x"
+    tools_spec="${tools_required%.*}.x"
     ;;
   latest)
     latest="$(python3 .github/scripts/resolve_latest_go.py "$tools_required")"
