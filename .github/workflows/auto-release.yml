@@ -102,7 +102,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: pjscruggs/slogcp
-          ref: d2a9043eee02524c14ec38ab418ae9685409c7a0
+          ref: 018dc91a45b0645c4a54281c4d0a7210d8d527e8
           path: .selected-graph-policy
           persist-credentials: false
 
