@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	cloud.google.com/go/logging v1.21.1
 	github.com/pjscruggs/slogcp-grpc v0.0.0-unpublished
-	github.com/pjscruggs/slogcp/v2 v2.0.3
+	github.com/pjscruggs/slogcp/v2 v2.0.4
 )
 
 replace github.com/pjscruggs/slogcp-grpc => ../..
