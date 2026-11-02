@@ -32,7 +32,7 @@ else
   for requested in "$@"; do
     matches=()
     for package in "${declared_packages[@]}"; do
-      if [[ "${package##*/}" == "$requested" ]]; then
+      if [[ "${package##*/}" == "$requested" || ( "${package##*/}" == header && "$requested" == license-eye ) ]]; then
         matches+=("$package")
       fi
     done
@@ -45,9 +45,25 @@ else
 fi
 
 mkdir -p "$CI_TOOLS_BIN"
-GOBIN="$CI_TOOLS_BIN" go install -mod=readonly -modfile .github/tools/go.mod "${packages[@]}"
+external_packages=()
+for package in "${packages[@]}"; do
+  if [[ "$package" == github.com/pjscruggs/slogcp-grpc/.github/tools/cmd/header ]]; then
+    go -C .github/tools test -mod=readonly ./cmd/header
+    go -C .github/tools build -mod=readonly -o "$CI_TOOLS_BIN/license-eye" ./cmd/header
+    binary="$CI_TOOLS_BIN/license-eye"
+  else
+    external_packages+=("$package")
+  fi
+done
+packages=("${external_packages[@]}")
+if (( ${#packages[@]} > 0 )); then
+  GOBIN="$CI_TOOLS_BIN" go install -mod=readonly -modfile .github/tools/go.mod "${packages[@]}"
+fi
 for package in "${packages[@]}"; do
   binary="$CI_TOOLS_BIN/${package##*/}"
   [[ -x "$binary" ]]
   go version -m "$binary" | awk 'NR == 1 || $1 == "path" || $1 == "mod" { print }'
 done
+if [[ -x "$CI_TOOLS_BIN/license-eye" ]]; then
+  go version -m "$CI_TOOLS_BIN/license-eye" | awk 'NR == 1 || $1 == "path" || $1 == "mod" { print }'
+fi
