@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   candidate:
-    uses: pjscruggs/slogcp/.github/workflows/module-candidate-e2e.yml@3e49bbf903760fa040a9cbcc098a93d9c54c8d63 # main
+    uses: pjscruggs/slogcp/.github/workflows/module-candidate-e2e.yml@40dc931469eec6a84fe5115605517bafd30bee24 # main
     permissions:
       contents: read
       checks: read
