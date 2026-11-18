@@ -109,7 +109,7 @@ jobs:
 
       - name: Set up selected graph resolver
         if: github.event_name == 'pull_request'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: stable
           check-latest: true
@@ -150,7 +150,7 @@ jobs:
 
       - name: Set up root compatibility Go runtime
         id: setup_go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ needs.validation_preflight.outputs.root_floor_spec }}
           check-latest: true
@@ -187,7 +187,7 @@ jobs:
 
       - name: Set up CI tools build runtime
         id: setup_tools_go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ needs.validation_preflight.outputs.tools_spec }}
           check-latest: true
@@ -210,7 +210,7 @@ jobs:
 
       - name: Set up preferred root Go runtime
         id: setup_go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ needs.validation_preflight.outputs.root_spec }}
           check-latest: true
@@ -320,7 +320,7 @@ jobs:
 
       - name: Set up example tools build runtime
         id: setup_tools_go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ needs.validation_preflight.outputs.tools_spec }}
           check-latest: true
@@ -341,7 +341,7 @@ jobs:
 
       - name: Set up module example Go runtime
         id: setup_go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ needs.validation_preflight.outputs.example_spec }}
           check-latest: true
